@@ -1,14 +1,37 @@
 """
-VTV Transcript Service v1.0.1
+VTV Transcript Service v1.1.0
 Fetches YouTube auto-generated transcripts via youtube-transcript-api.
+Supports optional Webshare residential proxy to bypass YouTube IP blocks
+on cloud providers (Render, AWS, etc.).
 """
 import os
 import re
 from flask import Flask, jsonify, request
 from youtube_transcript_api import YouTubeTranscriptApi
 
+try:
+    from youtube_transcript_api.proxies import WebshareProxyConfig
+    HAS_PROXY_SUPPORT = True
+except ImportError:
+    HAS_PROXY_SUPPORT = False
+
 app = Flask(__name__)
 SHARED_SECRET = os.environ.get("SHARED_SECRET", "")
+WEBSHARE_USERNAME = os.environ.get("WEBSHARE_USERNAME", "")
+WEBSHARE_PASSWORD = os.environ.get("WEBSHARE_PASSWORD", "")
+USE_PROXY = bool(WEBSHARE_USERNAME and WEBSHARE_PASSWORD and HAS_PROXY_SUPPORT)
+
+
+def _build_api() -> YouTubeTranscriptApi:
+    """Build a YouTubeTranscriptApi instance with optional Webshare proxy."""
+    if USE_PROXY:
+        return YouTubeTranscriptApi(
+            proxy_config=WebshareProxyConfig(
+                proxy_username=WEBSHARE_USERNAME,
+                proxy_password=WEBSHARE_PASSWORD,
+            )
+        )
+    return YouTubeTranscriptApi()
 
 
 def _check_auth(req) -> bool:
@@ -19,7 +42,12 @@ def _check_auth(req) -> bool:
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok", "service": "vtv-transcript", "version": "1.0.1"})
+    return jsonify({
+        "status": "ok",
+        "service": "vtv-transcript",
+        "version": "1.1.0",
+        "proxy_enabled": USE_PROXY,
+    })
 
 
 @app.route("/transcript", methods=["GET"])
@@ -35,11 +63,10 @@ def transcript():
     languages = [l.strip() for l in languages if l.strip()]
 
     try:
-        api = YouTubeTranscriptApi()
+        api = _build_api()
         try:
             fetched = api.fetch(video_id, languages=languages)
         except Exception:
-            # Fallback: try listing and using whatever's available
             try:
                 lst = api.list(video_id)
                 first = next(iter(lst))
@@ -71,6 +98,7 @@ def transcript():
             "segment_count": len(segments),
             "text": full_text,
             "segments": segments,
+            "proxy_used": USE_PROXY,
         })
 
     except Exception as e:
