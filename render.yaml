@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: vtv-transcript
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: SHARED_SECRET
+        sync: false  # set manually in Render dashboard
